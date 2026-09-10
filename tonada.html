@@ -161,6 +161,51 @@
   details{margin-top:14px; border-top:1px solid var(--line); padding-top:12px;}
   details summary{cursor:pointer; color:var(--muted); font-size:13px; font-weight:600;}
   details[open] summary{color:var(--text);}
+
+  /* --- anillo de tiempo, estilo spotiguess/blindtest.gg --- */
+  .timer-ring{
+    width:104px; height:104px; border-radius:50%;
+    margin:0 auto 16px;
+    display:flex; align-items:center; justify-content:center;
+    position:relative;
+    background:conic-gradient(var(--lime) 360deg, var(--line) 0deg);
+    transition:background .2s linear;
+  }
+  .timer-ring::before{
+    content:''; position:absolute; inset:7px; border-radius:50%; background:var(--panel);
+  }
+  .timer-ring span{position:relative; z-index:1; font-family:'Anton',sans-serif; font-size:30px;}
+
+  /* --- portada grande que se revela a medida que pasa el tiempo --- */
+  .cover-reveal{
+    width:180px; height:180px; margin:0 auto 16px;
+    border-radius:16px; overflow:hidden; background:#000;
+    border:2px solid var(--line);
+    box-shadow:6px 6px 0 var(--pink);
+  }
+  .cover-reveal img{width:100%; height:100%; object-fit:cover; filter:blur(20px); transition:filter .4s linear; transform:scale(1.15);}
+
+  /* --- avatares con iniciales --- */
+  .player-list li{display:flex; align-items:center; gap:10px; justify-content:flex-start;}
+  .player-list li .pname{flex:1; display:flex; align-items:center; gap:10px;}
+  .player-list li .pscore{font-weight:700;}
+  .answered-avatars{display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-bottom:14px; min-height:34px;}
+  .answered-avatars .waiting{opacity:.28;}
+
+  /* --- podio final --- */
+  .podium{display:flex; align-items:flex-end; gap:10px; justify-content:center; margin:10px 0 22px;}
+  .podium .pod{flex:1; max-width:120px; text-align:center;}
+  .podium .pod .bar{
+    border-radius:10px 10px 0 0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
+    padding:10px 6px; font-weight:700;
+  }
+  .podium .p1 .bar{height:130px; background:var(--lime); color:#180f22; order:2;}
+  .podium .p2 .bar{height:96px; background:var(--panel-2); border:2px solid var(--line); order:1;}
+  .podium .p3 .bar{height:74px; background:var(--panel-2); border:2px solid var(--line); order:3;}
+  .podium .p1{order:2;} .podium .p2{order:1;} .podium .p3{order:3;}
+  .podium .medal{font-size:26px; margin-bottom:4px;}
+  .podium .pname{font-size:13px; font-weight:700; margin-top:8px; word-break:break-word;}
+  .podium .pscore{font-size:12px; color:var(--muted);}
 </style>
 </head>
 <body>
@@ -243,6 +288,49 @@ async function sList(prefix, shared){
   return fbListKeys(prefix);
 }
 function uid(){ return Math.random().toString(36).slice(2,10); }
+/* ---------- identidad y sesión persistentes ----------
+   Antes, el id del jugador se generaba de nuevo en cada carga de página,
+   y "soy anfitrión" era una bandera que solo vivía en memoria. Eso hacía
+   que, en cuanto alguien recargaba la pestaña (muy común en celulares,
+   que "duermen" las pestañas en segundo plano), perdía su lugar: el
+   anfitrión dejaba de poder controlar la partida y los jugadores se
+   veían como "nuevos", reiniciando su puntaje. Ahora el id es fijo por
+   navegador (localStorage) y quién es anfitrión se recalcula siempre
+   comparando ese id contra room.hostId, así que sobrevive a recargas. */
+function loadIdentity(){
+  let id=null, name='';
+  try{
+    id = localStorage.getItem('tonada_uid');
+    name = localStorage.getItem('tonada_name') || '';
+  }catch(e){}
+  if(!id){
+    id = uid();
+    try{ localStorage.setItem('tonada_uid', id); }catch(e){}
+  }
+  return {id, name};
+}
+function saveSession(code, name){
+  try{
+    if(code) localStorage.setItem('tonada_code', code);
+    if(name) localStorage.setItem('tonada_name', name);
+  }catch(e){}
+}
+function clearSession(){
+  try{ localStorage.removeItem('tonada_code'); }catch(e){}
+}
+function getSavedCode(){
+  try{ return localStorage.getItem('tonada_code'); }catch(e){ return null; }
+}
+function avatarColor(name){
+  const colors=['#d7ff3f','#ff4d94','#4dc9ff','#ffb74d','#b18aff','#4dffa6'];
+  let h=0; for(let i=0;i<(name||'').length;i++) h = (h*31 + name.charCodeAt(i))>>>0;
+  return colors[h%colors.length];
+}
+function avatarHtml(name, size){
+  size = size||34;
+  const letter = (name||'?').trim().charAt(0).toUpperCase() || '?';
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;min-width:${size}px;border-radius:50%;background:${avatarColor(name)};color:#180f22;font-weight:700;font-family:'Anton',sans-serif;font-size:${Math.round(size*0.46)}px;">${esc(letter)}</span>`;
+}
 function genCode(){
   const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let c=''; for(let i=0;i<4;i++) c+=chars[Math.floor(Math.random()*chars.length)];
@@ -254,13 +342,15 @@ function normalize(s){
 }
 
 /* ---------- estado global ---------- */
+const _identity = loadIdentity();
 const S = {
-  screen:'home', code:null, myId:uid(), myName:'', isHost:false,
+  screen:'home', code:null, myId:_identity.id, myName:_identity.name, isHost:false,
   room:null, players:[], hasAnsweredRound:false, lastRoundKey:null,
   pollHandle:null, tickHandle:null, errorMsg:'', loadStatus:'',
   trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20',
   playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:'',
-  dbUrlInput:'', dbSetupError:'', dbSetupSaved:false
+  dbUrlInput:'', dbSetupError:'', dbSetupSaved:false, trackTextInput:'',
+  reconnecting:false
 };
 
 function roomKey(code){ return 'room:'+code; }
@@ -496,6 +586,7 @@ async function createRoom(name){
   await sSet(roomKey(code), JSON.stringify(room), true);
   await sSet(playerKey(code,S.myId), JSON.stringify({name:name.trim(), score:0}), true);
   S.code=code; S.isHost=true; S.myName=name.trim(); S.room=room; S.screen='lobby';
+  saveSession(code, name.trim());
   startPolling(); render();
 }
 async function joinRoom(name, code){
@@ -505,9 +596,36 @@ async function joinRoom(name, code){
   if(code.length<4){ S.errorMsg='Ingresa el código de la sala (4 caracteres).'; render(); return; }
   const raw = await sGet(roomKey(code), true);
   if(!raw){ S.errorMsg='No existe una sala con ese código.'; render(); return; }
-  await sSet(playerKey(code,S.myId), JSON.stringify({name:name.trim(), score:0}), true);
-  S.code=code; S.isHost=false; S.myName=name.trim(); S.room=JSON.parse(raw); S.screen='lobby';
+  const existingPlayer = await sGet(playerKey(code,S.myId), true);
+  const startScore = existingPlayer ? (JSON.parse(existingPlayer).score||0) : 0;
+  await sSet(playerKey(code,S.myId), JSON.stringify({name:name.trim(), score:startScore}), true);
+  const roomData = JSON.parse(raw);
+  S.code=code; S.myName=name.trim(); S.room=roomData; S.screen='lobby';
+  S.isHost = (roomData.hostId===S.myId);
+  saveSession(code, name.trim());
   startPolling(); render();
+}
+/* Reconecta automáticamente si el navegador ya tenía una sala guardada
+   (por ejemplo, tras recargar la página o que el celular "duerma" la
+   pestaña). Conserva el puntaje si el jugador ya existía en la sala. */
+async function tryReconnect(){
+  const code = getSavedCode();
+  if(!code) return false;
+  const raw = await sGet(roomKey(code), true);
+  if(!raw){ clearSession(); return false; }
+  const room = JSON.parse(raw);
+  if(room.status==='finished'){ clearSession(); return false; }
+  const existingPlayer = await sGet(playerKey(code,S.myId), true);
+  const name = existingPlayer ? JSON.parse(existingPlayer).name : S.myName;
+  if(!name){ clearSession(); return false; }
+  if(!existingPlayer){
+    await sSet(playerKey(code,S.myId), JSON.stringify({name, score:0}), true);
+  }
+  S.code = code; S.myName = name; S.room = room;
+  S.isHost = (room.hostId===S.myId);
+  saveSession(code, name);
+  startPolling();
+  return true;
 }
 async function saveRoom(){
   await sSet(roomKey(S.code), JSON.stringify(S.room), true);
@@ -542,15 +660,35 @@ async function startRound(idx){
   S.room.status = 'playing';
   await saveRoom();
 }
+let _revealing=false, _advancing=false;
 async function revealRound(){
-  if(S.room.status!=='playing') return;
-  S.room.status='reveal';
-  await saveRoom();
+  if(_revealing || !S.room || S.room.status!=='playing') return;
+  _revealing = true;
+  try{
+    // Se vuelve a leer la sala justo antes de escribir, para no pisar un
+    // cambio que otro cliente ya haya hecho (varios jugadores pueden
+    // llegar aquí casi al mismo tiempo cuando se acaba el reloj).
+    const raw = await sGet(roomKey(S.code), true);
+    const fresh = raw ? JSON.parse(raw) : S.room;
+    if(fresh.status!=='playing') { S.room=fresh; return; }
+    fresh.status='reveal';
+    fresh.revealStartTime=Date.now();
+    S.room=fresh;
+    await saveRoom();
+  } finally { _revealing=false; }
 }
 async function nextRound(){
-  const next = S.room.currentIndex+1;
-  if(next < S.room.tracks.length){ await startRound(next); }
-  else { S.room.status='finished'; await saveRoom(); }
+  if(_advancing || !S.room) return;
+  _advancing = true;
+  try{
+    const raw = await sGet(roomKey(S.code), true);
+    const fresh = raw ? JSON.parse(raw) : S.room;
+    if(fresh.status!=='reveal'){ S.room=fresh; return; }
+    const next = fresh.currentIndex+1;
+    S.room = fresh;
+    if(next < fresh.tracks.length){ await startRound(next); }
+    else { S.room.status='finished'; await saveRoom(); }
+  } finally { _advancing=false; }
 }
 
 /* ---------- envío de respuesta del jugador ---------- */
@@ -598,6 +736,9 @@ async function poll(){
   const changed = hash !== S.lastRoundKey;
   S.lastRoundKey = hash;
   S.room = room; S.players = players;
+  // Se recalcula en cada sondeo (no se guarda como bandera fija) para que
+  // el control de anfitrión sobreviva a recargas de página.
+  S.isHost = (room.hostId===S.myId);
   if(room.status!=='playing'){ S.hasAnsweredRound=false; }
   if(changed){
     render();
@@ -606,22 +747,52 @@ async function poll(){
   }
 }
 function tick(){
-  if(S.room && S.room.status==='playing'){
+  if(!S.room) return;
+  if(S.room.status==='playing'){
     updateLiveBits();
     const remaining = S.room.roundDuration - (Date.now()-S.room.roundStartTime);
-    if(remaining<=0 && S.isHost){ revealRound(); }
+    // Cualquier jugador (no solo el anfitrión) puede disparar la revelación
+    // cuando se acaba el tiempo: si el anfitrión perdió conexión o cerró la
+    // pestaña, la partida ya no se queda trabada para el resto.
+    if(remaining<=0){ revealRound(); }
+  } else if(S.room.status==='reveal'){
+    // Seguro adicional: si el anfitrión no avanza a la siguiente ronda
+    // (por ejemplo, se desconectó), cualquier cliente la avanza tras 45s.
+    const since = Date.now() - (S.room.revealStartTime||0);
+    if(S.room.revealStartTime && since>45000){ nextRound(); }
   }
 }
 async function updateLiveBits(){
-  const timerEl = document.getElementById('live-timer');
-  if(timerEl && S.room){
-    const remaining = Math.max(0, Math.ceil((S.room.roundDuration - (Date.now()-S.room.roundStartTime))/1000));
-    timerEl.textContent = remaining + 's';
+  if(S.room){
+    const elapsed = Date.now()-S.room.roundStartTime;
+    const frac = Math.min(1, Math.max(0, elapsed/S.room.roundDuration));
+    const remaining = Math.max(0, Math.ceil((S.room.roundDuration - elapsed)/1000));
+    const ring = document.getElementById('timer-ring');
+    if(ring){
+      const deg = 360*(1-frac);
+      const color = frac>0.75 ? 'var(--pink)' : 'var(--lime)';
+      ring.style.background = `conic-gradient(${color} ${deg}deg, var(--line) ${deg}deg)`;
+    }
+    const label = document.getElementById('timer-label');
+    if(label) label.textContent = remaining + 's';
+    const coverImg = document.getElementById('cover-img');
+    if(coverImg){
+      const blur = Math.max(0, 20*(1-frac));
+      coverImg.style.filter = 'blur('+blur.toFixed(1)+'px)';
+    }
   }
   const countEl = document.getElementById('live-answered');
-  if(countEl && S.room){
+  const avatarsEl = document.getElementById('answered-avatars');
+  if((countEl || avatarsEl) && S.room){
     const keys = await sList(guessPrefix(S.code, S.room.currentIndex), true);
-    countEl.textContent = keys.length + ' de ' + S.players.length + ' respondieron';
+    const answeredIds = new Set(keys.map(k => k.slice(guessPrefix(S.code, S.room.currentIndex).length)));
+    if(countEl) countEl.textContent = answeredIds.size + ' de ' + S.players.length + ' respondieron';
+    if(avatarsEl){
+      avatarsEl.innerHTML = S.players.map(p => {
+        const answered = answeredIds.has(p.id);
+        return `<span title="${esc(p.name)}" class="${answered?'':'waiting'}">${avatarHtml(p.name, 30)}</span>`;
+      }).join('');
+    }
   }
 }
 
@@ -631,6 +802,10 @@ function render(){
   if(needsBackendSetup()){
     app.innerHTML = viewBackendSetup();
     bindEvents();
+    return;
+  }
+  if(S.reconnecting){
+    app.innerHTML = '<div class="panel"><p class="muted" style="text-align:center;">Reconectando con tu sala…</p></div>';
     return;
   }
   if(!S.room){
@@ -709,7 +884,7 @@ function viewHome(){
 
 function viewLobby(){
   const r = S.room;
-  const playersHtml = S.players.map(p => `<li><span>${esc(p.name)}${p.id===S.myId?' (tú)':''}</span><span>${p.score||0} pts</span></li>`).join('');
+  const playersHtml = S.players.map(p => `<li><span class="pname">${avatarHtml(p.name)}${esc(p.name)}${p.id===S.myId?' (tú)':''}${p.id===r.hostId?' 👑':''}</span><span class="pscore">${p.score||0} pts</span></li>`).join('');
   let hostControls='';
   if(S.isHost){
     const poolCount = S.trackPool.length;
@@ -727,7 +902,7 @@ function viewLobby(){
       <div class="panel">
         <h3 style="margin-bottom:10px;">Opción B — Pegar canciones individuales</h3>
         <p class="muted" style="margin-top:0;">Por si la playlist es privada o falla la detección: en Spotify selecciona una o varias canciones → Compartir → Copiar enlace a la canción, y pega los links aquí (uno por línea).</p>
-        <textarea id="tracks-input" placeholder="https://open.spotify.com/track/...&#10;https://open.spotify.com/track/..."></textarea>
+        <textarea id="tracks-input" placeholder="https://open.spotify.com/track/...&#10;https://open.spotify.com/track/...">${esc(S.trackTextInput||'')}</textarea>
         <button id="btn-load-tracks">Añadir canciones</button>
         ${S.loadStatus ? `<p class="muted" style="margin-top:10px;">${esc(S.loadStatus)}</p>` : ''}
       </div>
@@ -791,7 +966,9 @@ function embedFallbackHtml(track){
 }
 function renderAudioContainer(track){
   if(!track.previewUrl) return embedFallbackHtml(track);
+  const coverHtml = track.thumb ? `<div class="cover-reveal"><img id="cover-img" src="${esc(track.thumb)}"></div>` : '';
   return `
+    ${coverHtml}
     <div style="margin-bottom:16px;">
       <audio id="round-audio" src="${esc(track.previewUrl)}" preload="auto" onerror="handleAudioFallback()"></audio>
       <button class="wide secondary" id="btn-play-audio" type="button">▶ Reproducir de nuevo</button>
@@ -834,8 +1011,9 @@ function viewGame(){
     <div class="stripe"><div><h1>RONDA ${r.currentIndex+1}<span style="font-size:20px;">/${r.tracks.length}</span></h1><p>adivina ${modeLabel}</p></div></div>
     <div class="panel">
       <div class="badge">${r.currentIndex+1} de ${r.tracks.length}</div>
-      <div class="timer" id="live-timer">--s</div>
+      <div class="timer-ring" id="timer-ring"><span id="timer-label">--s</span></div>
       ${playerBlock}
+      <div class="answered-avatars" id="answered-avatars"></div>
       <div class="answered-count muted" id="live-answered">0 de ${S.players.length} respondieron</div>
       ${answeredBlock}
     </div>
@@ -865,8 +1043,8 @@ async function renderRevealAsync(){
   guesses.sort((a,b)=>b.points-a.points);
   const modeLabel = r.roundMode==='song' ? 'Canción' : r.roundMode==='artist' ? 'Artista' : 'Año';
   const answerText = r.roundMode==='song' ? track.title : r.roundMode==='artist' ? track.artist : (track.year||'—');
-  const guessesHtml = guesses.length ? guesses.map(g=>`<div class="guess-line ${g.correct?'correct':''}"><span>${esc(g.name)}: ${esc(g.value)}</span><span>${g.correct?'+' + g.points:'—'}</span></div>`).join('') : '<p class="muted">Nadie respondió esta ronda.</p>';
-  const leaderboardHtml = S.players.map((p,i)=>`<li class="${i===0?'rank1':''}"><span>${i+1}. ${esc(p.name)}</span><span>${p.score||0} pts</span></li>`).join('');
+  const guessesHtml = guesses.length ? guesses.map(g=>`<div class="guess-line ${g.correct?'correct':''}"><span style="display:flex;align-items:center;gap:8px;">${avatarHtml(g.name,24)}${esc(g.name)}: ${esc(g.value)}</span><span>${g.correct?'+' + g.points:'—'}</span></div>`).join('') : '<p class="muted">Nadie respondió esta ronda.</p>';
+  const leaderboardHtml = S.players.map((p,i)=>`<li class="${i===0?'rank1':''}"><span class="pname">${i+1}. ${avatarHtml(p.name,28)}${esc(p.name)}</span><span class="pscore">${p.score||0} pts</span></li>`).join('');
   const hostBtn = S.isHost
     ? `<button class="wide" id="btn-next">${r.currentIndex+1 < r.tracks.length ? 'Siguiente ronda' : 'Ver resultados finales'}</button>`
     : `<p class="muted" style="text-align:center;">Esperando al anfitrión para continuar…</p>`;
@@ -891,12 +1069,28 @@ function sListRenderReveal(){ renderRevealAsync(); return '<div class="panel"><p
 
 function viewFinal(){
   const sorted = [...S.players].sort((a,b)=>b.score-a.score);
-  const rows = sorted.map((p,i)=>`<li class="${i===0?'rank1':''}"><span>${i+1}. ${esc(p.name)}</span><span>${p.score||0} pts</span></li>`).join('');
+  const top3 = sorted.slice(0,3);
+  const medals = ['🥇','🥈','🥉'];
+  const podiumHtml = top3.length ? `
+    <div class="podium">
+      ${top3.map((p,i)=>`
+        <div class="pod p${i+1}">
+          <div class="medal">${medals[i]}</div>
+          <div class="bar">${avatarHtml(p.name,36)}</div>
+          <div class="pname">${esc(p.name)}</div>
+          <div class="pscore">${p.score||0} pts</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+  const rest = sorted.slice(3);
+  const restHtml = rest.length ? `<ul class="player-list leaderboard">${rest.map((p,i)=>`<li><span class="pname">${i+4}. ${avatarHtml(p.name,28)}${esc(p.name)}</span><span class="pscore">${p.score||0} pts</span></li>`).join('')}</ul>` : '';
   return `
     <div class="stripe"><div><h1>FIN DEL JUEGO</h1><p>gracias por jugar</p></div></div>
     <div class="panel">
       <div class="trophy">🏆</div>
-      <ul class="player-list leaderboard">${rows}</ul>
+      ${podiumHtml}
+      ${restHtml}
     </div>
     <button class="wide secondary" id="btn-home">Volver al inicio</button>
   `;
@@ -940,6 +1134,7 @@ function bindEvents(){
     addToPool(metas);
     const failed = ids.length - metas.length;
     S.loadStatus = metas.length + ' canción(es) añadida(s) al total.' + (failed>0 ? ' ('+failed+' no se pudieron leer.)' : '');
+    S.trackTextInput = '';
     render();
   });
   on('playlist-input','input', (e) => { S.playlistForm.playlistUrl = e.target.value; });
@@ -1013,12 +1208,35 @@ function bindEvents(){
   on('btn-home','click', () => {
     if(S.pollHandle) clearInterval(S.pollHandle);
     if(S.tickHandle) clearInterval(S.tickHandle);
-    Object.assign(S, {screen:'home', code:null, room:null, players:[], isHost:false, myName:'', errorMsg:'', loadStatus:'', trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20', playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:''});
+    clearSession();
+    Object.assign(S, {screen:'home', code:null, room:null, players:[], isHost:false, myName:'', errorMsg:'', loadStatus:'', trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20', playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:'', trackTextInput:''});
     render();
   });
+  on('tracks-input','input', (e) => { S.trackTextInput = e.target.value; });
 }
 
-render();
+/* Los navegadores móviles suelen "congelar" los temporizadores (setInterval)
+   de una pestaña en segundo plano. Al volver a primer plano, se sondea de
+   inmediato y se reinician los intervalos — si no, la partida podía
+   quedarse "pegada" para ese jugador hasta que hiciera algo. */
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState==='visible' && S.code){
+    poll();
+    startPolling();
+  }
+});
+
+(async function boot(){
+  if(needsBackendSetup()){ render(); return; }
+  if(getSavedCode()){
+    S.reconnecting = true;
+    render();
+    const ok = await tryReconnect();
+    S.reconnecting = false;
+    if(!ok){ clearSession(); }
+  }
+  render();
+})();
 </script>
 </body>
 </html>
