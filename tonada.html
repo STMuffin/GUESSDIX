@@ -288,19 +288,67 @@ async function fetchTrackMeta(id){
     return { id, title: data.title || 'Canción', artist: data.author_name || 'Artista desconocido', thumb: data.thumbnail_url || '' };
   }catch(e){ return null; }
 }
+/* Deezer no permite fetch normal por CORS, pero su endpoint sí soporta JSONP
+   (output=jsonp&callback=...), lo que evita el problema por completo sin
+   necesitar ningún proxy. Se usa como segunda fuente de avances de 30s,
+   ya que cubre muchas canciones que iTunes no tiene o que ya no traen avance
+   desde la propia API de Spotify. */
+function fetchDeezerPreview(title, artist){
+  return new Promise((resolve) => {
+    const cbName = 'dzcb_' + Math.random().toString(36).slice(2);
+    let settled = false;
+    const cleanup = () => { try{ delete window[cbName]; }catch(e){} if(script.parentNode) script.remove(); };
+    const finish = (val) => { if(settled) return; settled=true; cleanup(); resolve(val); };
+    window[cbName] = (data) => {
+      const hit = data && data.data && data.data[0];
+      finish(hit && hit.preview ? { year:null, previewUrl: hit.preview } : null);
+    };
+    const script = document.createElement('script');
+    script.src = 'https://api.deezer.com/search?q=' + encodeURIComponent(artist+' '+title) + '&output=jsonp&callback='+cbName;
+    script.onerror = () => finish(null);
+    document.body.appendChild(script);
+    setTimeout(() => finish(null), 8000);
+  });
+}
 async function fetchTrackExtra(title, artist){
+  let year = null;
   try{
     const term = encodeURIComponent(title + ' ' + artist);
-    const res = await fetch('https://itunes.apple.com/search?term='+term+'&entity=song&limit=1');
-    if(!res.ok) return null;
-    const data = await res.json();
-    const r = data.results && data.results[0];
-    if(!r) return null;
-    return {
-      year: r.releaseDate ? parseInt(r.releaseDate.slice(0,4), 10) : null,
-      previewUrl: r.previewUrl || null
-    };
-  }catch(e){ return null; }
+    const res = await fetchWithTimeout('https://itunes.apple.com/search?term='+term+'&entity=song&limit=1', {}, 8000);
+    if(res.ok){
+      const data = await res.json();
+      const r = data.results && data.results[0];
+      if(r){
+        year = r.releaseDate ? parseInt(r.releaseDate.slice(0,4), 10) : null;
+        if(r.previewUrl) return { year, previewUrl: r.previewUrl };
+      }
+    }
+  }catch(e){ /* seguimos con Deezer como respaldo */ }
+  try{
+    const dz = await fetchDeezerPreview(title, artist);
+    if(dz) return { year: year || dz.year, previewUrl: dz.previewUrl };
+  }catch(e){}
+  return year ? { year, previewUrl: null } : null;
+}
+/* Ejecuta tareas asíncronas con un máximo de 'limit' en paralelo, en vez de
+   una por una (más rápido) o todas a la vez (puede saturar/limitar las APIs). */
+function asyncPool(limit, items, task){
+  return new Promise((resolve) => {
+    if(items.length===0){ resolve([]); return; }
+    const results = new Array(items.length);
+    let i=0, active=0, done=0;
+    function runNext(){
+      if(done>=items.length){ resolve(results); return; }
+      while(active<limit && i<items.length){
+        const idx=i++; active++;
+        Promise.resolve(task(items[idx], idx))
+          .then(r=>{ results[idx]=r; })
+          .catch(()=>{ results[idx]=null; })
+          .finally(()=>{ active--; done++; runNext(); });
+      }
+    }
+    runNext();
+  });
 }
 
 /* ---------- carga de playlist completa, SIN client id/secret y SIN login (como blindtest.gg) ----------
@@ -323,26 +371,36 @@ function extractPlaylistId(text){
 }
 const CORS_PROXIES = [
   (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
   (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
   (u) => 'https://api.cors.lol/url=' + u,
-  (u) => 'https://proxy.corsfix.com/?' + u
+  (u) => 'https://proxy.corsfix.com/?' + u,
+  (u) => 'https://thingproxy.freeboard.io/fetch/' + u
 ];
 function fetchWithTimeout(url, opts, ms){
   return Promise.race([
     fetch(url, opts),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms || 9000))
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms || 10000))
   ]);
 }
-async function proxyFetchText(targetUrl){
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+/* Prueba cada proxy y, si todos fallan, reintenta la ronda completa un par de veces
+   más (con una pequeña pausa) antes de darse por vencido — muchos de estos proxies
+   gratuitos fallan de forma intermitente, no permanente. */
+async function proxyFetchText(targetUrl, attemptsPerProxy){
+  attemptsPerProxy = attemptsPerProxy || 2;
   let lastErr;
-  for(const build of CORS_PROXIES){
-    try{
-      const res = await fetchWithTimeout(build(targetUrl), { cache:'no-store' }, 9000);
-      if(!res.ok) throw new Error('status '+res.status);
-      const text = await res.text();
-      if(!text) throw new Error('empty');
-      return text;
-    }catch(e){ lastErr = e; }
+  for(let round=0; round<attemptsPerProxy; round++){
+    for(const build of CORS_PROXIES){
+      try{
+        const res = await fetchWithTimeout(build(targetUrl), { cache:'no-store' }, 10000);
+        if(!res.ok) throw new Error('status '+res.status);
+        const text = await res.text();
+        if(!text) throw new Error('empty');
+        return text;
+      }catch(e){ lastErr = e; }
+    }
+    if(round < attemptsPerProxy-1) await sleep(600);
   }
   throw lastErr || new Error('todos los proxies fallaron');
 }
@@ -353,15 +411,40 @@ async function getAnonymousSpotifyToken(){
   if(!data || !data.accessToken) throw new Error('token-empty');
   return data.accessToken;
 }
+/* Pide una página de la playlist. Si api.spotify.com falla por red/CORS,
+   reintenta un par de veces y, como último recurso, prueba vía proxy CORS
+   (algunos navegadores/redes bloquean la llamada directa). Si Spotify
+   responde 429 (límite de peticiones), respeta el "Retry-After". */
+async function fetchPlaylistPage(url, token){
+  let lastErr;
+  for(let i=0;i<3;i++){
+    try{
+      const res = await fetchWithTimeout(url, { headers:{ 'Authorization':'Bearer '+token } }, 10000);
+      if(res.status===429){
+        const wait = parseInt(res.headers.get('Retry-After')||'2',10);
+        await sleep(Math.min(wait,8)*1000);
+        continue;
+      }
+      if(!res.ok) throw new Error('status '+res.status);
+      return await res.json();
+    }catch(e){
+      lastErr = e;
+      await sleep(500*(i+1));
+    }
+  }
+  // Último recurso: pasar por un proxy CORS (sin headers, así que el token va en la URL)
+  try{
+    const text = await proxyFetchText(url + '&access_token=' + encodeURIComponent(token), 1);
+    return JSON.parse(text);
+  }catch(e){ throw lastErr || e; }
+}
 async function fetchPlaylistTracksAll(token, playlistId, onProgress){
   const tracks=[];
   let url = 'https://api.spotify.com/v1/playlists/'+playlistId+
     '/tracks?fields=next,items(track(id,name,preview_url,artists(name),album(images,release_date)))&limit=100';
   let pages=0;
   while(url && pages<400){
-    const res = await fetch(url, { headers:{ 'Authorization':'Bearer '+token } });
-    if(!res.ok) throw new Error('fetch');
-    const data = await res.json();
+    const data = await fetchPlaylistPage(url, token);
     for(const item of (data.items||[])){
       const t = item.track;
       if(!t || !t.id) continue;
@@ -559,6 +642,7 @@ function render(){
   } else if(S.room.status==='playing'){
     S.screen='game-live';
     app.innerHTML = viewGame();
+    attemptAutoplay();
   } else if(S.room.status==='reveal'){
     S.screen='game-reveal';
     app.innerHTML = viewReveal();
@@ -618,7 +702,7 @@ function viewHome(){
       <button class="wide" id="btn-join">Unirse</button>
     </div>
     <div class="footer-note">
-      Cada ronda suena con un avance de 30 segundos — no necesitas cuenta Premium ni iniciar sesión en Spotify. Si alguna canción no tiene avance disponible, se usa el reproductor oficial de Spotify como respaldo.
+      Cada ronda suena sola, con un avance de 30 segundos — no necesitas cuenta Premium ni iniciar sesión en Spotify. Si Spotify no trae avance para alguna canción, Tonada busca uno alterno; y si aun así no hay avance, se usa el reproductor oficial de Spotify como respaldo.
     </div>
   `;
 }
@@ -698,6 +782,41 @@ function viewLobby(){
   `;
 }
 
+/* ---------- reproducción de audio de la ronda ----------
+   Se intenta reproducir el avance de 30s automáticamente al empezar la ronda.
+   Si ese avance falla (link vencido, bloqueado, etc.) se reemplaza solo,
+   en el momento, por el reproductor embebido de Spotify como respaldo. */
+function embedFallbackHtml(track){
+  return `<div class="embed-crop"><iframe src="https://open.spotify.com/embed/track/${track.id}?utm_source=generator&theme=0&autoplay=1" width="100%" height="352" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe></div>`;
+}
+function renderAudioContainer(track){
+  if(!track.previewUrl) return embedFallbackHtml(track);
+  return `
+    <div style="margin-bottom:16px;">
+      <audio id="round-audio" src="${esc(track.previewUrl)}" preload="auto" onerror="handleAudioFallback()"></audio>
+      <button class="wide secondary" id="btn-play-audio" type="button">▶ Reproducir de nuevo</button>
+      <p class="muted" style="text-align:center; margin:8px 0 0;" id="autoplay-hint">El audio empieza solo — si no suena, toca el botón.</p>
+    </div>
+  `;
+}
+function handleAudioFallback(){
+  const track = S.room && S.room.tracks[S.room.currentIndex];
+  const container = document.getElementById('audio-container');
+  if(!track || !container) return;
+  track.previewUrl = null; // este avance no sirvió; no reintentar en esta ronda
+  container.innerHTML = embedFallbackHtml(track);
+}
+function attemptAutoplay(){
+  const a = document.getElementById('round-audio');
+  if(!a) return;
+  const hint = document.getElementById('autoplay-hint');
+  const playPromise = a.play();
+  if(playPromise && playPromise.catch){
+    playPromise.then(() => { if(hint) hint.style.display='none'; })
+      .catch(() => { /* el navegador bloqueó el autoplay; el botón manual sigue disponible */ });
+  }
+}
+
 function viewGame(){
   const r = S.room;
   const track = r.tracks[r.currentIndex];
@@ -710,12 +829,7 @@ function viewGame(){
       <input type="${inputType}" id="guess-input" placeholder="${r.roundMode==='year' ? 'p. ej. 1999' : 'Escribe tu respuesta'}" autocomplete="off">
       <button class="wide" id="btn-guess">Enviar respuesta</button>
     `;
-  const playerBlock = track.previewUrl
-    ? `<div style="margin-bottom:16px;">
-         <audio id="round-audio" src="${esc(track.previewUrl)}" preload="auto"></audio>
-         <button class="wide secondary" id="btn-play-audio" type="button">▶ Reproducir avance (30s)</button>
-       </div>`
-    : `<div class="embed-crop"><iframe src="https://open.spotify.com/embed/track/${track.id}?utm_source=generator&theme=0" width="100%" height="352" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe></div>`;
+  const playerBlock = `<div id="audio-container">${renderAudioContainer(track)}</div>`;
   return `
     <div class="stripe"><div><h1>RONDA ${r.currentIndex+1}<span style="font-size:20px;">/${r.tracks.length}</span></h1><p>adivina ${modeLabel}</p></div></div>
     <div class="panel">
@@ -819,10 +933,10 @@ function bindEvents(){
       S.loadStatus = 'Cargando '+done+'/'+ids.length+'…';
       if(meta) metas.push(meta);
     }
-    await Promise.all(metas.map(async m => {
+    await asyncPool(5, metas, async (m) => {
       const extra = await fetchTrackExtra(m.title, m.artist);
-      if(extra){ m.year = extra.year; m.previewUrl = extra.previewUrl; }
-    }));
+      if(extra){ if(extra.year) m.year = extra.year; if(extra.previewUrl) m.previewUrl = extra.previewUrl; }
+    });
     addToPool(metas);
     const failed = ids.length - metas.length;
     S.loadStatus = metas.length + ' canción(es) añadida(s) al total.' + (failed>0 ? ' ('+failed+' no se pudieron leer.)' : '');
@@ -860,7 +974,8 @@ function bindEvents(){
     if(needsExtra.length){
       S.preparingGame = true;
       let done = 0;
-      for(const t of needsExtra){
+      S.preparingStatus = 'Preparando canciones 0/'+needsExtra.length+'…'; render();
+      await asyncPool(5, needsExtra, async (t) => {
         const extra = await fetchTrackExtra(t.title, t.artist);
         if(extra){
           if(extra.previewUrl) t.previewUrl = extra.previewUrl;
@@ -869,7 +984,7 @@ function bindEvents(){
         done++;
         S.preparingStatus = 'Preparando canciones ' + done + '/' + needsExtra.length + '…';
         render();
-      }
+      });
       S.preparingGame = false;
     }
     S.room.tracks = chosen;
