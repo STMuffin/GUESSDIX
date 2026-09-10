@@ -170,71 +170,77 @@
 /* ---------- utilidades de almacenamiento ----------
    Dentro de Claude existe window.storage y se usa directo.
    Fuera de Claude (GitHub Pages, Netlify, etc.) ese objeto NO existe,
-   así que se usa como respaldo una base de datos remota gratuita
-   (kvdb.io) para que todos los jugadores compartan el mismo estado
-   de sala sin necesitar cuenta ni servidor propio. */
-let KV_BUCKET_ID = 'DBLVxG6DVE7aSGEYFN3S2H';
+   así que se usa como respaldo Firebase Realtime Database: una base
+   de datos gratuita de Google a la que se llama por HTTP puro (REST),
+   sin SDK, sin client id ni client secret, y con CORS habilitado de
+   forma nativa (a diferencia de kvdb.io, que dejó de funcionar).
+   El único dato que hace falta es la "databaseURL" del proyecto, que
+   NO es secreta: es la misma que Firebase espera que quede visible
+   en el código del navegador; la privacidad de los datos se controla
+   con las reglas de la base de datos, no ocultando esa URL. */
+let FIREBASE_DB_URL = 'PON_AQUI_TU_URL_DE_FIREBASE';
+try{
+  if(typeof localStorage!=='undefined'){
+    const saved = localStorage.getItem('tonada_db_url');
+    if(saved) FIREBASE_DB_URL = saved;
+  }
+}catch(e){}
 
 function hasNativeStorage(){
   return typeof window!=='undefined' && !!window.storage && typeof window.storage.get==='function';
 }
-async function kvCreateBucket(){
-  const res = await fetch('https://kvdb.io/', { method:'POST' });
-  if(!res.ok) throw new Error('create-failed');
-  const text = (await res.text()).trim();
+function dbUrl(){ return FIREBASE_DB_URL.replace(/\/+$/,''); }
+async function fbGet(key){
   try{
-    const data = JSON.parse(text);
-    return data.id || data.bucket_id || data.bucket || text;
-  }catch(e){ return text; }
-}
-async function kvGet(key){
-  try{
-    const res = await fetch('https://kvdb.io/'+KV_BUCKET_ID+'/'+encodeURIComponent(key), { cache:'no-store' });
-    if(res.status===404) return null;
+    const res = await fetch(dbUrl()+'/tonada/'+encodeURIComponent(key)+'.json', { cache:'no-store' });
     if(!res.ok) return null;
-    return await res.text();
+    const text = await res.text();
+    if(!text || text==='null') return null;
+    try{ return JSON.parse(text); }catch(e){ return null; }
   }catch(e){ return null; }
 }
-async function kvSet(key, value){
+async function fbSet(key, value){
   try{
-    const res = await fetch('https://kvdb.io/'+KV_BUCKET_ID+'/'+encodeURIComponent(key), { method:'POST', body:value });
+    const res = await fetch(dbUrl()+'/tonada/'+encodeURIComponent(key)+'.json', { method:'PUT', body: JSON.stringify(value) });
     return res.ok;
   }catch(e){ return false; }
 }
-async function kvListKeys(prefix){
+async function fbListKeys(prefix){
   try{
-    const res = await fetch('https://kvdb.io/'+KV_BUCKET_ID+'/?prefix='+encodeURIComponent(prefix), { cache:'no-store' });
-    if(res.status===404) return [];
+    const res = await fetch(dbUrl()+'/tonada.json?shallow=true', { cache:'no-store' });
     if(!res.ok) return [];
     const text = await res.text();
-    return text.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!text || text==='null') return [];
+    let data;
+    try{ data = JSON.parse(text); }catch(e){ return []; }
+    if(!data) return [];
+    return Object.keys(data).filter(k => k.startsWith(prefix));
   }catch(e){ return []; }
 }
-function needsKvSetup(){
+function needsBackendSetup(){
   if(hasNativeStorage()) return false;
-  if(S.kvJustCreated) return true;
-  return !KV_BUCKET_ID || KV_BUCKET_ID === 'PON_AQUI_TU_BUCKET_ID';
+  return !FIREBASE_DB_URL || FIREBASE_DB_URL === 'PON_AQUI_TU_URL_DE_FIREBASE';
 }
 async function sGet(key, shared){
   if(hasNativeStorage()){
     try{ const r = await window.storage.get(key, !!shared); return r ? r.value : null; }
     catch(e){ return null; }
   }
-  return kvGet(key);
+  return fbGet(key);
 }
 async function sSet(key, value, shared){
   if(hasNativeStorage()){
     try{ await window.storage.set(key, value, !!shared); return true; }
     catch(e){ return false; }
   }
-  return kvSet(key, value);
+  return fbSet(key, value);
 }
 async function sList(prefix, shared){
   if(hasNativeStorage()){
     try{ const r = await window.storage.list(prefix, !!shared); return (r && r.keys) ? r.keys : []; }
     catch(e){ return []; }
   }
-  return kvListKeys(prefix);
+  return fbListKeys(prefix);
 }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function genCode(){
@@ -254,7 +260,7 @@ const S = {
   pollHandle:null, tickHandle:null, errorMsg:'', loadStatus:'',
   trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20',
   playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:'',
-  kvJustCreated:false, kvSetupLoading:false, kvSetupError:'', kvSetupId:null, kvManualId:''
+  dbUrlInput:'', dbSetupError:'', dbSetupSaved:false
 };
 
 function roomKey(code){ return 'room:'+code; }
@@ -303,7 +309,11 @@ async function fetchTrackExtra(title, artist){
    Ese endpoint no permite CORS desde otros dominios, así que se pide a través de un
    proxy CORS público (con varias alternativas de respaldo por si alguna falla).
    Con ese token ya se puede leer la playlist directo en api.spotify.com (que sí
-   permite CORS), igual que si fuera un usuario autenticado. */
+   permite CORS), igual que si fuera un usuario autenticado.
+   Nota: los proxies CORS públicos y gratuitos cambian de disponibilidad con el
+   tiempo (algunos empiezan a pedir cuenta o limitan su uso a "localhost"), por
+   eso se prueban varios en cadena y, si todos fallan, la Opción B (pegar los
+   links de canciones sueltas, que no depende de ningún proxy) sigue funcionando. */
 function extractPlaylistId(text){
   const t = (text||'').trim();
   const m = t.match(/playlist\/([a-zA-Z0-9]{15,30})/);
@@ -314,8 +324,8 @@ function extractPlaylistId(text){
 const CORS_PROXIES = [
   (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
   (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-  (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
-  (u) => 'https://thingproxy.freeboard.io/fetch/' + u
+  (u) => 'https://api.cors.lol/url=' + u,
+  (u) => 'https://proxy.corsfix.com/?' + u
 ];
 function fetchWithTimeout(url, opts, ms){
   return Promise.race([
@@ -535,8 +545,8 @@ async function updateLiveBits(){
 /* ---------- render ---------- */
 function render(){
   const app = document.getElementById('app');
-  if(needsKvSetup()){
-    app.innerHTML = viewKvSetup();
+  if(needsBackendSetup()){
+    app.innerHTML = viewBackendSetup();
     bindEvents();
     return;
   }
@@ -560,34 +570,28 @@ function render(){
   if(S.screen==='game-live') updateLiveBits();
 }
 
-function viewKvSetup(){
+function viewBackendSetup(){
   return `
     <div class="stripe"><div><h1>CONFIGURACIÓN</h1><p>un solo paso, una sola vez</p></div></div>
     <div class="panel">
-      <p class="muted" style="margin-top:0;">Este archivo está alojado fuera de Claude (por ejemplo en GitHub Pages), así que Tonada necesita una pequeña base de datos gratuita para que los jugadores se vean entre sí en la sala. No requiere cuenta ni tarjeta, y se hace una sola vez.</p>
-      <button class="wide" id="btn-kv-create" ${S.kvSetupLoading?'disabled':''}>${S.kvSetupLoading?'Creando…':'Crear base de datos gratuita'}</button>
-      ${S.kvSetupError ? `<div class="error">${esc(S.kvSetupError)}</div>` : ''}
-      ${S.kvSetupId ? `
-        <div style="margin-top:16px;">
-          <label for="kv-id-display">Tu ID (guárdalo en el archivo)</label>
-          <input type="text" id="kv-id-display" readonly onclick="this.select()" value="${esc(S.kvSetupId)}">
-          <p class="muted" style="margin-top:0; line-height:1.7;">
-            1. Copia este ID.<br>
-            2. Abre el archivo .html en un editor de texto (Bloc de notas sirve) y busca la línea:<br>
-            <code>let KV_BUCKET_ID = 'PON_AQUI_TU_BUCKET_ID';</code><br>
-            3. Reemplaza <code>PON_AQUI_TU_BUCKET_ID</code> por tu ID, entre las mismas comillas.<br>
-            4. Guarda el archivo y vuelve a subirlo a GitHub Pages.<br>
-            Después de eso, cualquiera que entre a tu link ya podrá jugar en sala con otros — este paso no se repite.
-          </p>
-          <button class="wide secondary" id="btn-kv-continue">Continuar por ahora (solo en este navegador)</button>
-        </div>
+      <p class="muted" style="margin-top:0;">Este archivo está alojado fuera de Claude (por ejemplo en GitHub Pages), así que Tonada necesita una base de datos gratuita para que los jugadores de una misma sala se vean entre sí. Se usa <strong>Firebase Realtime Database</strong> (de Google): es gratis, no pide tarjeta, y no usa "client ID" ni "client secret" — solo una URL pública de tu proyecto.</p>
+      <p class="muted" style="line-height:1.7;">
+        1. Entra a <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> y crea un proyecto gratis (con tu cuenta de Google).<br>
+        2. En el menú, ve a <strong>Build → Realtime Database → Crear base de datos</strong>.<br>
+        3. Elige cualquier ubicación y selecciona <strong>"Iniciar en modo de prueba"</strong> (acceso público de lectura/escritura — correcto para un juego de fiesta sin datos sensibles).<br>
+        4. Copia la URL que aparece arriba de la base de datos (algo como <code>https://tu-proyecto-default-rtdb.firebaseio.com</code>) y pégala abajo.
+      </p>
+      <label for="db-url-input">URL de tu Realtime Database</label>
+      <input type="text" id="db-url-input" placeholder="https://tu-proyecto-default-rtdb.firebaseio.com" value="${esc(S.dbUrlInput||'')}">
+      ${S.dbSetupError ? `<div class="error">${esc(S.dbSetupError)}</div>` : ''}
+      <button class="wide" id="btn-db-save">Guardar y continuar</button>
+      ${S.dbSetupSaved ? `
+        <p class="muted" style="margin-top:14px; line-height:1.7;">
+          Listo por ahora en <strong>este navegador</strong>. Para que funcione para todos los que entren a tu link (no solo tú), abre el archivo .html en un editor de texto, busca la línea:<br>
+          <code>let FIREBASE_DB_URL = 'PON_AQUI_TU_URL_DE_FIREBASE';</code><br>
+          reemplaza <code>PON_AQUI_TU_URL_DE_FIREBASE</code> por tu URL (entre las mismas comillas), guarda el archivo y vuelve a subirlo a GitHub Pages. Este paso no se repite.
+        </p>
       ` : ''}
-    </div>
-    <div class="panel">
-      <h3 style="margin-bottom:10px;">¿Ya tienes un ID?</h3>
-      <p class="muted" style="margin-top:0;">Si ya lo generaste antes y solo quieres probarlo en este navegador sin editar el archivo todavía:</p>
-      <input type="text" id="kv-manual-id" placeholder="Pega aquí tu ID de kvdb.io" value="${esc(S.kvManualId||'')}">
-      <button class="wide secondary" id="btn-kv-use-manual">Usar este ID</button>
     </div>
   `;
 }
@@ -787,26 +791,17 @@ function viewFinal(){
 /* ---------- eventos ---------- */
 function bindEvents(){
   const on = (id, ev, fn) => { const el = document.getElementById(id); if(el) el.addEventListener(ev, fn); };
-  on('btn-kv-create','click', async () => {
-    S.kvSetupLoading = true; S.kvSetupError=''; render();
-    try{
-      const id = await kvCreateBucket();
-      KV_BUCKET_ID = id;
-      S.kvSetupId = id;
-      S.kvJustCreated = true;
-    }catch(e){
-      S.kvSetupError = 'No se pudo crear la base de datos gratuita. Revisa tu conexión e inténtalo de nuevo.';
+  on('db-url-input','input', (e) => { S.dbUrlInput = e.target.value; });
+  on('btn-db-save','click', () => {
+    let v = (S.dbUrlInput||'').trim().replace(/\/+$/,'');
+    S.dbSetupError=''; S.dbSetupSaved=false;
+    if(!/^https:\/\/.+/.test(v)){
+      S.dbSetupError = 'Pega la URL completa, empezando con https://';
+      render(); return;
     }
-    S.kvSetupLoading = false;
-    render();
-  });
-  on('btn-kv-continue','click', () => { S.kvJustCreated = false; render(); });
-  on('kv-manual-id','input', (e) => { S.kvManualId = e.target.value; });
-  on('btn-kv-use-manual','click', () => {
-    const v = (S.kvManualId||'').trim();
-    if(!v) return;
-    KV_BUCKET_ID = v;
-    S.kvJustCreated = false;
+    FIREBASE_DB_URL = v;
+    try{ localStorage.setItem('tonada_db_url', v); }catch(e){}
+    S.dbSetupSaved = true;
     render();
   });
   on('btn-create','click', () => createRoom(document.getElementById('host-name').value));
