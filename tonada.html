@@ -178,7 +178,7 @@
    NO es secreta: es la misma que Firebase espera que quede visible
    en el código del navegador; la privacidad de los datos se controla
    con las reglas de la base de datos, no ocultando esa URL. */
-let FIREBASE_DB_URL = 'PON_AQUI_TU_URL_DE_FIREBASE';
+let FIREBASE_DB_URL = 'https://shardix-default-rtdb.firebaseio.com/';
 try{
   if(typeof localStorage!=='undefined'){
     const saved = localStorage.getItem('tonada_db_url');
