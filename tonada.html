@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Tonada — adivina la canción</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#180f22;
+    --panel:#231732;
+    --panel-2:#2c1c40;
+    --lime:#d7ff3f;
+    --pink:#ff4d94;
+    --text:#f5f1fa;
+    --muted:#b3a2c7;
+    --line:#3a2850;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(215,255,63,0.08), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(255,77,148,0.10), transparent 45%);
+    color:var(--text);
+    font-family:'Space Grotesk', sans-serif;
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    padding:28px 16px 60px;
+  }
+  h1,h2,h3{font-family:'Anton', sans-serif; font-weight:400; letter-spacing:0.5px; margin:0;}
+  #app{width:100%; max-width:640px;}
+  .stripe{
+    position:relative;
+    background:var(--lime);
+    color:#180f22;
+    transform:skewY(-2deg);
+    padding:22px 24px;
+    margin:0 0 34px 0;
+    box-shadow:8px 8px 0 var(--pink);
+  }
+  .stripe > div{transform:skewY(2deg);}
+  .stripe h1{font-size:38px; line-height:1;}
+  .stripe p{margin:8px 0 0; font-size:14px; font-weight:600;}
+  .panel{
+    background:var(--panel);
+    border:2px solid var(--line);
+    border-radius:10px;
+    padding:22px;
+    margin-bottom:18px;
+  }
+  .panel + .panel{margin-top:0;}
+  label{display:block; font-size:13px; color:var(--muted); margin-bottom:6px; font-weight:600;}
+  input[type=text], input[type=number], textarea, select{
+    width:100%;
+    background:var(--bg);
+    border:2px solid var(--line);
+    border-radius:8px;
+    color:var(--text);
+    padding:11px 12px;
+    font-family:'Space Grotesk', sans-serif;
+    font-size:15px;
+    margin-bottom:14px;
+  }
+  input:focus, textarea:focus, select:focus{outline:none; border-color:var(--lime);}
+  textarea{min-height:110px; resize:vertical; line-height:1.5;}
+  button{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:15px;
+    border:2px solid var(--text);
+    background:var(--text);
+    color:#180f22;
+    padding:12px 18px;
+    border-radius:8px;
+    cursor:pointer;
+    box-shadow:4px 4px 0 var(--pink);
+    transition:transform .08s ease;
+  }
+  button:active{transform:translate(2px,2px); box-shadow:2px 2px 0 var(--pink);}
+  button.secondary{background:transparent; color:var(--text); box-shadow:4px 4px 0 var(--lime);}
+  button.wide{width:100%;}
+  button:disabled{opacity:.4; cursor:not-allowed; box-shadow:none;}
+  .row{display:flex; gap:12px;}
+  .row > *{flex:1;}
+  .muted{color:var(--muted); font-size:13px;}
+  .error{color:var(--pink); font-size:13px; font-weight:600; margin:-6px 0 12px;}
+  .code-display{
+    font-family:'Anton', sans-serif;
+    font-size:44px;
+    letter-spacing:8px;
+    color:var(--lime);
+    text-align:center;
+    margin:6px 0 4px;
+  }
+  .player-list{list-style:none; padding:0; margin:0;}
+  .player-list li{
+    display:flex; justify-content:space-between;
+    padding:10px 12px;
+    background:var(--panel-2);
+    border-radius:6px;
+    margin-bottom:8px;
+    font-weight:600;
+  }
+  .badge{
+    display:inline-block;
+    background:var(--pink);
+    color:#180f22;
+    font-weight:700;
+    font-size:12px;
+    padding:4px 10px;
+    border-radius:20px;
+    margin-bottom:14px;
+  }
+  .embed-crop{
+    height:90px;
+    overflow:hidden;
+    border-radius:12px;
+    position:relative;
+    background:#000;
+    margin-bottom:16px;
+    border:2px solid var(--line);
+  }
+  .embed-crop iframe{
+    position:absolute;
+    top:-262px; left:0;
+    width:100%;
+    border:0;
+  }
+  .timer{
+    font-family:'Anton', sans-serif;
+    font-size:30px;
+    color:var(--pink);
+    text-align:center;
+    margin-bottom:10px;
+  }
+  .answered-count{text-align:center; margin-bottom:16px;}
+  .track-thumb{width:44px; height:44px; border-radius:6px; object-fit:cover; margin-right:10px; vertical-align:middle;}
+  .track-row{display:flex; align-items:center; padding:6px 0; font-size:14px;}
+  .leaderboard li{align-items:center;}
+  .rank1{color:var(--lime);}
+  .reveal-answer{
+    display:flex; align-items:center; gap:14px;
+    background:var(--panel-2);
+    border-radius:8px;
+    padding:14px;
+    margin-bottom:16px;
+  }
+  .reveal-answer img{width:64px; height:64px; border-radius:8px; object-fit:cover;}
+  .guess-line{display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px solid var(--line); font-size:14px;}
+  .guess-line.correct{color:var(--lime);}
+  .footer-note{font-size:12px; color:var(--muted); text-align:center; margin-top:30px; line-height:1.6;}
+  .tabs{display:flex; gap:10px; margin-bottom:18px;}
+  .tabs button{flex:1;}
+  .hidden{display:none;}
+  .trophy{font-size:40px; text-align:center; margin-bottom:6px;}
+  a{color:var(--lime);}
+  details{margin-top:14px; border-top:1px solid var(--line); padding-top:12px;}
+  details summary{cursor:pointer; color:var(--muted); font-size:13px; font-weight:600;}
+  details[open] summary{color:var(--text);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ---------- utilidades de almacenamiento ---------- */
+async function sGet(key, shared){
+  try{ const r = await window.storage.get(key, !!shared); return r ? r.value : null; }
+  catch(e){ return null; }
+}
+async function sSet(key, value, shared){
+  try{ await window.storage.set(key, value, !!shared); return true; }
+  catch(e){ return false; }
+}
+async function sList(prefix, shared){
+  try{ const r = await window.storage.list(prefix, !!shared); return (r && r.keys) ? r.keys : []; }
+  catch(e){ return []; }
+}
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function genCode(){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c=''; for(let i=0;i<4;i++) c+=chars[Math.floor(Math.random()*chars.length)];
+  return c;
+}
+function esc(s){ return (s||'').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function normalize(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+/* ---------- estado global ---------- */
+const S = {
+  screen:'home', code:null, myId:uid(), myName:'', isHost:false,
+  room:null, players:[], hasAnsweredRound:false, lastRoundKey:null,
+  pollHandle:null, tickHandle:null, errorMsg:'', loadStatus:'',
+  trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20',
+  playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:''
+};
+
+function roomKey(code){ return 'room:'+code; }
+function playerKey(code,pid){ return 'p:'+code+':'+pid; }
+function playerPrefix(code){ return 'p:'+code+':'; }
+function guessKey(code,idx,pid){ return 'g:'+code+':'+idx+':'+pid; }
+function guessPrefix(code,idx){ return 'g:'+code+':'+idx+':'; }
+
+/* ---------- carga de canciones desde Spotify (oEmbed, sin login) ---------- */
+function extractTrackIds(text){
+  const ids=[]; const seen=new Set();
+  const re=/track\/([a-zA-Z0-9]{15,30})/g;
+  let m;
+  while((m=re.exec(text))!==null){
+    if(!seen.has(m[1])){ seen.add(m[1]); ids.push(m[1]); }
+  }
+  return ids;
+}
+async function fetchTrackMeta(id){
+  try{
+    const url = 'https://open.spotify.com/oembed?url=' + encodeURIComponent('https://open.spotify.com/track/'+id);
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    const data = await res.json();
+    return { id, title: data.title || 'Canción', artist: data.author_name || 'Artista desconocido', thumb: data.thumbnail_url || '' };
+  }catch(e){ return null; }
+}
+async function fetchTrackExtra(title, artist){
+  try{
+    const term = encodeURIComponent(title + ' ' + artist);
+    const res = await fetch('https://itunes.apple.com/search?term='+term+'&entity=song&limit=1');
+    if(!res.ok) return null;
+    const data = await res.json();
+    const r = data.results && data.results[0];
+    if(!r) return null;
+    return {
+      year: r.releaseDate ? parseInt(r.releaseDate.slice(0,4), 10) : null,
+      previewUrl: r.previewUrl || null
+    };
+  }catch(e){ return null; }
+}
+
+/* ---------- carga de playlist completa, SIN client id/secret y SIN login (como blindtest.gg) ----------
+   Truco: open.spotify.com entrega un token anónimo de solo-lectura en /get_access_token
+   (el mismo que usa el propio reproductor web de Spotify para visitantes sin sesión).
+   Ese endpoint no permite CORS desde otros dominios, así que se pide a través de un
+   proxy CORS público (con varias alternativas de respaldo por si alguna falla).
+   Con ese token ya se puede leer la playlist directo en api.spotify.com (que sí
+   permite CORS), igual que si fuera un usuario autenticado. */
+function extractPlaylistId(text){
+  const t = (text||'').trim();
+  const m = t.match(/playlist\/([a-zA-Z0-9]{15,30})/);
+  if(m) return m[1];
+  if(/^[a-zA-Z0-9]{15,30}$/.test(t)) return t;
+  return null;
+}
+const CORS_PROXIES = [
+  (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
+  (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+  (u) => 'https://thingproxy.freeboard.io/fetch/' + u
+];
+async function proxyFetchText(targetUrl){
+  let lastErr;
+  for(const build of CORS_PROXIES){
+    try{
+      const res = await fetch(build(targetUrl), { cache:'no-store' });
+      if(!res.ok) throw new Error('status '+res.status);
+      const text = await res.text();
+      if(!text) throw new Error('empty');
+      return text;
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('todos los proxies fallaron');
+}
+async function getAnonymousSpotifyToken(){
+  const text = await proxyFetchText('https://open.spotify.com/get_access_token?reason=transport&productType=embed');
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ throw new Error('token-parse'); }
+  if(!data || !data.accessToken) throw new Error('token-empty');
+  return data.accessToken;
+}
+async function fetchPlaylistTracksAll(token, playlistId, onProgress){
+  const tracks=[];
+  let url = 'https://api.spotify.com/v1/playlists/'+playlistId+
+    '/tracks?fields=next,items(track(id,name,preview_url,artists(name),album(images,release_date)))&limit=100';
+  let pages=0;
+  while(url && pages<400){
+    const res = await fetch(url, { headers:{ 'Authorization':'Bearer '+token } });
+    if(!res.ok) throw new Error('fetch');
+    const data = await res.json();
+    for(const item of (data.items||[])){
+      const t = item.track;
+      if(!t || !t.id) continue;
+      const images = (t.album && t.album.images) || [];
+      const thumb = images.length ? (images[images.length>1?images.length-2:0].url) : '';
+      const year = (t.album && t.album.release_date) ? parseInt(t.album.release_date.slice(0,4),10) : null;
+      tracks.push({
+        id:t.id,
+        title:t.name,
+        artist:(t.artists||[]).map(a=>a.name).join(', '),
+        thumb, year,
+        previewUrl: t.preview_url || null
+      });
+    }
+    pages++;
+    if(onProgress) onProgress(tracks.length);
+    url = data.next || null;
+  }
+  return tracks;
+}
+function addToPool(newTracks){
+  const seen = new Set(S.trackPool.map(t=>t.id));
+  for(const t of newTracks){ if(!seen.has(t.id)){ seen.add(t.id); S.trackPool.push(t); } }
+}
+function sampleArray(arr, n){
+  const copy = arr.slice();
+  for(let i=copy.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [copy[i],copy[j]]=[copy[j],copy[i]];
+  }
+  return copy.slice(0, n);
+}
+
+/* ---------- acciones de sala ---------- */
+async function createRoom(name){
+  S.errorMsg='';
+  if(!name.trim()){ S.errorMsg='Escribe tu nombre.'; render(); return; }
+  let code;
+  for(let i=0;i<12;i++){
+    code = genCode();
+    const existing = await sGet(roomKey(code), true);
+    if(!existing) break;
+  }
+  const room = {
+    hostId:S.myId, hostName:name.trim(), status:'lobby',
+    tracks:[], currentIndex:-1, roundStartTime:0, roundDuration:20000,
+    mode:'mixed', roundMode:null, createdAt:Date.now()
+  };
+  await sSet(roomKey(code), JSON.stringify(room), true);
+  await sSet(playerKey(code,S.myId), JSON.stringify({name:name.trim(), score:0}), true);
+  S.code=code; S.isHost=true; S.myName=name.trim(); S.room=room; S.screen='lobby';
+  startPolling(); render();
+}
+async function joinRoom(name, code){
+  S.errorMsg='';
+  code=(code||'').trim().toUpperCase();
+  if(!name.trim()){ S.errorMsg='Escribe tu nombre.'; render(); return; }
+  if(code.length<4){ S.errorMsg='Ingresa el código de la sala (4 caracteres).'; render(); return; }
+  const raw = await sGet(roomKey(code), true);
+  if(!raw){ S.errorMsg='No existe una sala con ese código.'; render(); return; }
+  await sSet(playerKey(code,S.myId), JSON.stringify({name:name.trim(), score:0}), true);
+  S.code=code; S.isHost=false; S.myName=name.trim(); S.room=JSON.parse(raw); S.screen='lobby';
+  startPolling(); render();
+}
+async function saveRoom(){
+  await sSet(roomKey(S.code), JSON.stringify(S.room), true);
+}
+async function loadPlayers(){
+  const keys = await sList(playerPrefix(S.code), true);
+  const players=[];
+  for(const k of keys){
+    const raw = await sGet(k, true);
+    if(raw){
+      const pid = k.slice(playerPrefix(S.code).length);
+      const data = JSON.parse(raw);
+      players.push({id:pid, name:data.name, score:data.score||0});
+    }
+  }
+  players.sort((a,b)=>b.score-a.score);
+  return players;
+}
+
+/* ---------- lógica de partida (controlada por el anfitrión) ---------- */
+function pickRoundMode(track, globalMode){
+  if(globalMode!=='mixed') return globalMode;
+  const opts=['song','artist'];
+  if(track.year) opts.push('year');
+  return opts[Math.floor(Math.random()*opts.length)];
+}
+async function startRound(idx){
+  const track = S.room.tracks[idx];
+  S.room.currentIndex = idx;
+  S.room.roundMode = pickRoundMode(track, S.room.mode);
+  S.room.roundStartTime = Date.now();
+  S.room.status = 'playing';
+  await saveRoom();
+}
+async function revealRound(){
+  if(S.room.status!=='playing') return;
+  S.room.status='reveal';
+  await saveRoom();
+}
+async function nextRound(){
+  const next = S.room.currentIndex+1;
+  if(next < S.room.tracks.length){ await startRound(next); }
+  else { S.room.status='finished'; await saveRoom(); }
+}
+
+/* ---------- envío de respuesta del jugador ---------- */
+async function submitGuess(value){
+  const idx = S.room.currentIndex;
+  const track = S.room.tracks[idx];
+  const mode = S.room.roundMode;
+  const elapsed = Date.now() - S.room.roundStartTime;
+  const frac = Math.min(1, Math.max(0, elapsed / S.room.roundDuration));
+  let correct=false;
+  if(mode==='year'){
+    const g = parseInt(value,10);
+    correct = track.year!=null && !isNaN(g) && Math.abs(g-track.year)<=1;
+  } else {
+    const target = mode==='song' ? track.title : track.artist;
+    const g = normalize(value), t = normalize(target);
+    correct = g.length>0 && (g===t || (t.length>=3 && t.includes(g) && g.length>=3) || (g.length>=3 && g.includes(t)));
+  }
+  const points = correct ? Math.round(500 + 500*(1-frac)) : 0;
+  await sSet(guessKey(S.code, idx, S.myId), JSON.stringify({value, correct, points, elapsed}), true);
+  const myRaw = await sGet(playerKey(S.code, S.myId), true);
+  const me = myRaw ? JSON.parse(myRaw) : {name:S.myName, score:0};
+  me.score = (me.score||0) + points;
+  await sSet(playerKey(S.code, S.myId), JSON.stringify(me), true);
+  S.hasAnsweredRound = true;
+  render();
+}
+
+/* ---------- sondeo (polling) ---------- */
+function startPolling(){
+  if(S.pollHandle) clearInterval(S.pollHandle);
+  if(S.tickHandle) clearInterval(S.tickHandle);
+  poll();
+  S.pollHandle = setInterval(poll, 2000);
+  S.tickHandle = setInterval(tick, 1000);
+}
+async function poll(){
+  if(!S.code) return;
+  const raw = await sGet(roomKey(S.code), true);
+  if(!raw) return;
+  const room = JSON.parse(raw);
+  const players = await loadPlayers();
+  const hash = [room.status, room.currentIndex, room.roundStartTime, players.length,
+                room.tracks.length, room.mode, room.roundDuration].join(':');
+  const changed = hash !== S.lastRoundKey;
+  S.lastRoundKey = hash;
+  S.room = room; S.players = players;
+  if(room.status!=='playing'){ S.hasAnsweredRound=false; }
+  if(changed){
+    render();
+  } else if(S.screen==='game-live'){
+    updateLiveBits();
+  }
+}
+function tick(){
+  if(S.room && S.room.status==='playing'){
+    updateLiveBits();
+    const remaining = S.room.roundDuration - (Date.now()-S.room.roundStartTime);
+    if(remaining<=0 && S.isHost){ revealRound(); }
+  }
+}
+async function updateLiveBits(){
+  const timerEl = document.getElementById('live-timer');
+  if(timerEl && S.room){
+    const remaining = Math.max(0, Math.ceil((S.room.roundDuration - (Date.now()-S.room.roundStartTime))/1000));
+    timerEl.textContent = remaining + 's';
+  }
+  const countEl = document.getElementById('live-answered');
+  if(countEl && S.room){
+    const keys = await sList(guessPrefix(S.code, S.room.currentIndex), true);
+    countEl.textContent = keys.length + ' de ' + S.players.length + ' respondieron';
+  }
+}
+
+/* ---------- render ---------- */
+function render(){
+  const app = document.getElementById('app');
+  if(!S.room){
+    S.screen='home';
+    app.innerHTML = viewHome();
+  } else if(S.room.status==='lobby'){
+    S.screen='lobby';
+    app.innerHTML = viewLobby();
+  } else if(S.room.status==='playing'){
+    S.screen='game-live';
+    app.innerHTML = viewGame();
+  } else if(S.room.status==='reveal'){
+    S.screen='game-reveal';
+    app.innerHTML = viewReveal();
+  } else if(S.room.status==='finished'){
+    S.screen='final';
+    app.innerHTML = viewFinal();
+  }
+  bindEvents();
+  if(S.screen==='game-live') updateLiveBits();
+}
+
+function viewHome(){
+  return `
+    <div class="stripe"><div>
+      <h1>TONADA</h1>
+      <p>adivina la canción, gana con velocidad</p>
+    </div></div>
+    <div class="panel">
+      <h3 style="margin-bottom:14px;">Crear una sala</h3>
+      <label for="host-name">Tu nombre</label>
+      <input type="text" id="host-name" placeholder="Anfitrión">
+      <button class="wide" id="btn-create">Crear sala</button>
+    </div>
+    <div class="panel">
+      <h3 style="margin-bottom:14px;">Unirse a una sala</h3>
+      <label for="join-name">Tu nombre</label>
+      <input type="text" id="join-name" placeholder="Jugador">
+      <label for="join-code">Código de la sala</label>
+      <input type="text" id="join-code" placeholder="ABCD" maxlength="4" style="text-transform:uppercase;">
+      ${S.errorMsg ? `<div class="error">${esc(S.errorMsg)}</div>` : ''}
+      <button class="wide" id="btn-join">Unirse</button>
+    </div>
+    <div class="footer-note">
+      Cada ronda suena con un avance de 30 segundos — no necesitas cuenta Premium ni iniciar sesión en Spotify. Si alguna canción no tiene avance disponible, se usa el reproductor oficial de Spotify como respaldo.
+    </div>
+  `;
+}
+
+function viewLobby(){
+  const r = S.room;
+  const playersHtml = S.players.map(p => `<li><span>${esc(p.name)}${p.id===S.myId?' (tú)':''}</span><span>${p.score||0} pts</span></li>`).join('');
+  let hostControls='';
+  if(S.isHost){
+    const poolCount = S.trackPool.length;
+    const roundOptions = [10,15,20,25,30,50].filter(n => n<=poolCount || poolCount===0);
+    const previewList = S.trackPool.slice(0,8).map(t=>`<div class="track-row">${t.thumb?`<img class="track-thumb" src="${esc(t.thumb)}">`:''}<div>${esc(t.title)} — ${esc(t.artist)}${t.year?' ('+t.year+')':''}</div></div>`).join('');
+    hostControls = `
+      <div class="panel">
+        <h3 style="margin-bottom:10px;">Opción A — Cargar una playlist completa (automático)</h3>
+        <p class="muted" style="margin-top:0;">Pega el link de una playlist pública de Spotify. Tonada detecta todas las canciones automáticamente: sin Client ID, sin Client Secret y sin iniciar sesión.</p>
+        <label for="playlist-input">Link o código de la playlist</label>
+        <input type="text" id="playlist-input" placeholder="https://open.spotify.com/playlist/..." value="${esc(S.playlistForm.playlistUrl)}">
+        <button class="wide" id="btn-load-playlist" ${S.playlistLoading?'disabled':''}>${S.playlistLoading?'Detectando…':'Detectar canciones'}</button>
+        ${S.playlistStatus ? `<p class="muted" style="margin-top:10px;">${esc(S.playlistStatus)}</p>` : ''}
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:10px;">Opción B — Pegar canciones individuales</h3>
+        <p class="muted" style="margin-top:0;">Por si la playlist es privada o falla la detección: en Spotify selecciona una o varias canciones → Compartir → Copiar enlace a la canción, y pega los links aquí (uno por línea).</p>
+        <textarea id="tracks-input" placeholder="https://open.spotify.com/track/...&#10;https://open.spotify.com/track/..."></textarea>
+        <button id="btn-load-tracks">Añadir canciones</button>
+        ${S.loadStatus ? `<p class="muted" style="margin-top:10px;">${esc(S.loadStatus)}</p>` : ''}
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:10px;">Canciones disponibles: ${poolCount}</h3>
+        ${poolCount>0 ? `<div style="max-height:160px; overflow:auto;">${previewList}${poolCount>8?`<p class="muted">y ${poolCount-8} más…</p>`:''}</div><button class="secondary" id="btn-clear-pool" style="margin-top:12px;">Vaciar lista</button>` : `<p class="muted" style="margin:0;">Carga canciones con la Opción A o B para empezar.</p>`}
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:10px;">Configuración de la partida</h3>
+        <div class="row">
+          <div>
+            <label for="rounds-select">Número de rondas</label>
+            <select id="rounds-select">
+              ${roundOptions.map(n=>`<option value="${n}" ${String(n)===S.roundsWanted?'selected':''}>${n} canciones</option>`).join('')}
+              <option value="all" ${S.roundsWanted==='all'?'selected':''}>Todas (${poolCount})</option>
+            </select>
+          </div>
+          <div>
+            <label for="mode-select">Modo de juego</label>
+            <select id="mode-select">
+              <option value="mixed" ${r.mode==='mixed'?'selected':''}>Mixto (canción, artista y año)</option>
+              <option value="song" ${r.mode==='song'?'selected':''}>Adivinar la canción</option>
+              <option value="artist" ${r.mode==='artist'?'selected':''}>Adivinar el artista</option>
+              <option value="year" ${r.mode==='year'?'selected':''}>Adivinar el año</option>
+            </select>
+          </div>
+        </div>
+        <label for="duration-select">Tiempo por ronda</label>
+        <select id="duration-select">
+          <option value="10000" ${r.roundDuration===10000?'selected':''}>10 segundos</option>
+          <option value="20000" ${r.roundDuration===20000?'selected':''}>20 segundos</option>
+          <option value="30000" ${r.roundDuration===30000?'selected':''}>30 segundos</option>
+        </select>
+        <button class="wide" id="btn-start" ${(poolCount===0||S.preparingGame)?'disabled':''}>${S.preparingGame ? (S.preparingStatus||'Preparando…') : 'Iniciar partida'}</button>
+      </div>
+    `;
+  } else {
+    hostControls = `<div class="panel"><p class="muted" style="margin:0;">Esperando a que ${esc(r.hostName)} cargue las canciones y comience la partida…</p></div>`;
+  }
+  return `
+    <div class="stripe"><div><h1>SALA</h1><p>comparte el código con tus amigos</p></div></div>
+    <div class="panel">
+      <div class="code-display">${esc(S.code)}</div>
+      <button class="wide secondary" id="btn-copy-code">Copiar código</button>
+      <p class="muted" style="text-align:center; margin-top:10px;">open.spotify.com no necesario para unirse — solo entra aquí y escribe este código</p>
+    </div>
+    <div class="panel">
+      <h3 style="margin-bottom:10px;">Jugadores (${S.players.length})</h3>
+      <ul class="player-list">${playersHtml}</ul>
+    </div>
+    ${hostControls}
+  `;
+}
+
+function viewGame(){
+  const r = S.room;
+  const track = r.tracks[r.currentIndex];
+  const modeLabel = r.roundMode==='song' ? 'el nombre de la canción' : r.roundMode==='artist' ? 'el artista' : 'el año de lanzamiento';
+  const inputType = r.roundMode==='year' ? 'number' : 'text';
+  const answeredBlock = S.hasAnsweredRound
+    ? `<p class="muted" style="text-align:center;">Respuesta enviada. Esperando a los demás jugadores…</p>`
+    : `
+      <label for="guess-input">Adivina ${modeLabel}</label>
+      <input type="${inputType}" id="guess-input" placeholder="${r.roundMode==='year' ? 'p. ej. 1999' : 'Escribe tu respuesta'}" autocomplete="off">
+      <button class="wide" id="btn-guess">Enviar respuesta</button>
+    `;
+  const playerBlock = track.previewUrl
+    ? `<div style="margin-bottom:16px;">
+         <audio id="round-audio" src="${esc(track.previewUrl)}" preload="auto"></audio>
+         <button class="wide secondary" id="btn-play-audio" type="button">▶ Reproducir avance (30s)</button>
+       </div>`
+    : `<div class="embed-crop"><iframe src="https://open.spotify.com/embed/track/${track.id}?utm_source=generator&theme=0" width="100%" height="352" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe></div>`;
+  return `
+    <div class="stripe"><div><h1>RONDA ${r.currentIndex+1}<span style="font-size:20px;">/${r.tracks.length}</span></h1><p>adivina ${modeLabel}</p></div></div>
+    <div class="panel">
+      <div class="badge">${r.currentIndex+1} de ${r.tracks.length}</div>
+      <div class="timer" id="live-timer">--s</div>
+      ${playerBlock}
+      <div class="answered-count muted" id="live-answered">0 de ${S.players.length} respondieron</div>
+      ${answeredBlock}
+    </div>
+  `;
+}
+
+function viewReveal(){
+  const r = S.room;
+  const track = r.tracks[r.currentIndex];
+  return sListRenderReveal(r, track);
+}
+async function renderRevealAsync(){
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="panel"><p class="muted">Cargando resultados…</p></div>';
+  const r = S.room;
+  const track = r.tracks[r.currentIndex];
+  const keys = await sList(guessPrefix(S.code, r.currentIndex), true);
+  const guesses = [];
+  for(const k of keys){
+    const raw = await sGet(k, true);
+    if(raw){
+      const pid = k.slice(guessPrefix(S.code, r.currentIndex).length);
+      const player = S.players.find(p=>p.id===pid);
+      guesses.push({name: player?player.name:'???', ...JSON.parse(raw)});
+    }
+  }
+  guesses.sort((a,b)=>b.points-a.points);
+  const modeLabel = r.roundMode==='song' ? 'Canción' : r.roundMode==='artist' ? 'Artista' : 'Año';
+  const answerText = r.roundMode==='song' ? track.title : r.roundMode==='artist' ? track.artist : (track.year||'—');
+  const guessesHtml = guesses.length ? guesses.map(g=>`<div class="guess-line ${g.correct?'correct':''}"><span>${esc(g.name)}: ${esc(g.value)}</span><span>${g.correct?'+' + g.points:'—'}</span></div>`).join('') : '<p class="muted">Nadie respondió esta ronda.</p>';
+  const leaderboardHtml = S.players.map((p,i)=>`<li class="${i===0?'rank1':''}"><span>${i+1}. ${esc(p.name)}</span><span>${p.score||0} pts</span></li>`).join('');
+  const hostBtn = S.isHost
+    ? `<button class="wide" id="btn-next">${r.currentIndex+1 < r.tracks.length ? 'Siguiente ronda' : 'Ver resultados finales'}</button>`
+    : `<p class="muted" style="text-align:center;">Esperando al anfitrión para continuar…</p>`;
+  app.innerHTML = `
+    <div class="stripe"><div><h1>RESULTADO</h1><p>${modeLabel} — ronda ${r.currentIndex+1} de ${r.tracks.length}</p></div></div>
+    <div class="panel">
+      <div class="reveal-answer">
+        ${track.thumb?`<img src="${esc(track.thumb)}">`:''}
+        <div><strong>${esc(track.title)}</strong><br><span class="muted">${esc(track.artist)}${track.year?' · '+track.year:''}</span></div>
+      </div>
+      ${guessesHtml}
+    </div>
+    <div class="panel">
+      <h3 style="margin-bottom:10px;">Marcador</h3>
+      <ul class="player-list leaderboard">${leaderboardHtml}</ul>
+      ${hostBtn}
+    </div>
+  `;
+  bindEvents();
+}
+function sListRenderReveal(){ renderRevealAsync(); return '<div class="panel"><p class="muted">Cargando resultados…</p></div>'; }
+
+function viewFinal(){
+  const sorted = [...S.players].sort((a,b)=>b.score-a.score);
+  const rows = sorted.map((p,i)=>`<li class="${i===0?'rank1':''}"><span>${i+1}. ${esc(p.name)}</span><span>${p.score||0} pts</span></li>`).join('');
+  return `
+    <div class="stripe"><div><h1>FIN DEL JUEGO</h1><p>gracias por jugar</p></div></div>
+    <div class="panel">
+      <div class="trophy">🏆</div>
+      <ul class="player-list leaderboard">${rows}</ul>
+    </div>
+    <button class="wide secondary" id="btn-home">Volver al inicio</button>
+  `;
+}
+
+/* ---------- eventos ---------- */
+function bindEvents(){
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if(el) el.addEventListener(ev, fn); };
+  on('btn-create','click', () => createRoom(document.getElementById('host-name').value));
+  on('btn-join','click', () => joinRoom(document.getElementById('join-name').value, document.getElementById('join-code').value));
+  on('btn-load-tracks','click', async () => {
+    const text = document.getElementById('tracks-input').value;
+    const ids = extractTrackIds(text);
+    if(ids.length===0){ S.loadStatus='No se encontró ningún link de canción válido.'; render(); return; }
+    S.loadStatus = 'Cargando 0/'+ids.length+'…'; render();
+    const metas = [];
+    let done=0;
+    for(const id of ids){
+      const meta = await fetchTrackMeta(id);
+      done++;
+      S.loadStatus = 'Cargando '+done+'/'+ids.length+'…';
+      if(meta) metas.push(meta);
+    }
+    await Promise.all(metas.map(async m => {
+      const extra = await fetchTrackExtra(m.title, m.artist);
+      if(extra){ m.year = extra.year; m.previewUrl = extra.previewUrl; }
+    }));
+    addToPool(metas);
+    const failed = ids.length - metas.length;
+    S.loadStatus = metas.length + ' canción(es) añadida(s) al total.' + (failed>0 ? ' ('+failed+' no se pudieron leer.)' : '');
+    render();
+  });
+  on('playlist-input','input', (e) => { S.playlistForm.playlistUrl = e.target.value; });
+  on('btn-load-playlist','click', async () => {
+    const playlistId = extractPlaylistId(S.playlistForm.playlistUrl);
+    if(!playlistId){ S.playlistStatus='No se reconoció el link o código de la playlist.'; render(); return; }
+    S.playlistLoading = true; S.playlistStatus='Conectando con Spotify de forma anónima…'; render();
+    try{
+      const token = await getAnonymousSpotifyToken();
+      S.playlistStatus='Descargando canciones de la playlist…'; render();
+      const tracks = await fetchPlaylistTracksAll(token, playlistId, (n)=>{ S.playlistStatus = n+' canciones descargadas…'; render(); });
+      if(tracks.length===0){
+        S.playlistStatus = 'La playlist parece estar vacía o es privada.';
+      } else {
+        addToPool(tracks);
+        S.playlistStatus = tracks.length + ' canción(es) de la playlist añadida(s) al total.';
+      }
+    }catch(e){
+      S.playlistStatus = 'No se pudo detectar la playlist automáticamente (puede ser privada, o los servidores intermediarios están saturados). Intenta de nuevo en unos segundos, o usa la Opción B mientras tanto.';
+    }
+    S.playlistLoading = false;
+    render();
+  });
+  on('btn-clear-pool','click', () => { S.trackPool = []; S.loadStatus=''; S.playlistStatus=''; render(); });
+  on('rounds-select','change', (e) => { S.roundsWanted = e.target.value; });
+  on('mode-select','change', async (e) => { S.room.mode = e.target.value; await saveRoom(); });
+  on('duration-select','change', async (e) => { S.room.roundDuration = parseInt(e.target.value,10); await saveRoom(); });
+  on('btn-start','click', async () => {
+    const n = S.roundsWanted==='all' ? S.trackPool.length : Math.min(parseInt(S.roundsWanted,10), S.trackPool.length);
+    const chosen = sampleArray(S.trackPool, n);
+    const needsExtra = chosen.filter(t => !t.previewUrl);
+    if(needsExtra.length){
+      S.preparingGame = true;
+      let done = 0;
+      for(const t of needsExtra){
+        const extra = await fetchTrackExtra(t.title, t.artist);
+        if(extra){
+          if(extra.previewUrl) t.previewUrl = extra.previewUrl;
+          if(!t.year && extra.year) t.year = extra.year;
+        }
+        done++;
+        S.preparingStatus = 'Preparando canciones ' + done + '/' + needsExtra.length + '…';
+        render();
+      }
+      S.preparingGame = false;
+    }
+    S.room.tracks = chosen;
+    await saveRoom();
+    await startRound(0);
+  });
+  on('btn-guess','click', () => {
+    const val = document.getElementById('guess-input').value;
+    if(!val || !val.trim()) return;
+    submitGuess(val.trim());
+  });
+  on('btn-next','click', () => nextRound());
+  on('btn-copy-code','click', async (e) => {
+    try{
+      await navigator.clipboard.writeText(S.code);
+      const btn = e.target;
+      const old = btn.textContent;
+      btn.textContent = '¡Copiado!';
+      setTimeout(() => { btn.textContent = old; }, 1500);
+    }catch(err){ /* clipboard no disponible, se ignora */ }
+  });
+  on('btn-play-audio','click', () => {
+    const a = document.getElementById('round-audio');
+    if(a){ a.currentTime = 0; a.play().catch(()=>{}); }
+  });
+  on('btn-home','click', () => {
+    if(S.pollHandle) clearInterval(S.pollHandle);
+    if(S.tickHandle) clearInterval(S.tickHandle);
+    Object.assign(S, {screen:'home', code:null, room:null, players:[], isHost:false, myName:'', errorMsg:'', loadStatus:'', trackPool:[], playlistStatus:'', playlistLoading:false, roundsWanted:'20', playlistForm:{playlistUrl:''}, preparingGame:false, preparingStatus:''});
+    render();
+  });
+}
+
+render();
+</script>
+</body>
+</html>
